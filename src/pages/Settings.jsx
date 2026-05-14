@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Cloud, CloudOff, RefreshCw, Settings as SettingsIcon, Trash2, Download, Upload } from 'lucide-react';
+import { Cloud, CloudOff, RefreshCw, Settings as SettingsIcon, Trash2, Download, Upload, Lock, LogOut } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { isAuthenticated, isConfigured, initGoogleAuth, requestToken, signOut } from '../services/driveService';
 import { syncToCloud, syncFromCloud, getSyncStatus, onSyncStatus } from '../services/syncService';
+import { lockApp, verifyPassword, changePassword } from '../components/LockScreen';
 import db from '../db/db';
 
 export default function Settings() {
@@ -12,6 +13,9 @@ export default function Settings() {
   const [authed, setAuthed] = useState(isAuthenticated());
   const [syncStatus, setSyncStatus] = useState(getSyncStatus());
   const [exportLoading, setExportLoading] = useState(false);
+  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState(false);
 
   useEffect(() => {
     const unsub = onSyncStatus(s => { setSyncStatus(s); setAuthed(isAuthenticated()); });
@@ -146,6 +150,63 @@ export default function Settings() {
             </div>
           </div>
         )}
+      </Card>
+
+      <Card className="p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Lock size={18} className="text-gray-600" />
+          <h2 className="font-semibold text-gray-900">Security</h2>
+        </div>
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between py-3 border-b border-gray-100">
+            <div>
+              <p className="font-medium text-gray-800 text-sm">Lock app</p>
+              <p className="text-xs text-gray-400">Requires password to re-enter</p>
+            </div>
+            <Button onClick={lockApp} variant="secondary" size="sm">
+              <LogOut size={14} /> Lock Now
+            </Button>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <p className="font-medium text-gray-800 text-sm">Change password</p>
+            <Input
+              placeholder="Current password"
+              type="password"
+              value={pwForm.current}
+              onChange={e => { setPwForm(f => ({ ...f, current: e.target.value })); setPwError(''); setPwSuccess(false); }}
+            />
+            <Input
+              placeholder="New password (min 4 characters)"
+              type="password"
+              value={pwForm.next}
+              onChange={e => { setPwForm(f => ({ ...f, next: e.target.value })); setPwError(''); setPwSuccess(false); }}
+            />
+            <Input
+              placeholder="Confirm new password"
+              type="password"
+              value={pwForm.confirm}
+              onChange={e => { setPwForm(f => ({ ...f, confirm: e.target.value })); setPwError(''); setPwSuccess(false); }}
+            />
+            {pwError && <p className="text-xs text-red-600">{pwError}</p>}
+            {pwSuccess && <p className="text-xs text-green-600">Password changed successfully!</p>}
+            <Button
+              size="sm"
+              className="self-start"
+              onClick={async () => {
+                setPwError(''); setPwSuccess(false);
+                if (!await verifyPassword(pwForm.current)) { setPwError('Current password is incorrect'); return; }
+                if (pwForm.next.length < 4) { setPwError('New password must be at least 4 characters'); return; }
+                if (pwForm.next !== pwForm.confirm) { setPwError('New passwords do not match'); return; }
+                await changePassword(pwForm.next);
+                setPwForm({ current: '', next: '', confirm: '' });
+                setPwSuccess(true);
+              }}
+            >
+              Change Password
+            </Button>
+          </div>
+        </div>
       </Card>
 
       <Card className="p-6">

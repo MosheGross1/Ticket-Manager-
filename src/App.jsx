@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { HashRouter as BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
+import { LockScreen } from './components/LockScreen';
 import Dashboard from './pages/Dashboard';
 import Customers from './pages/Customers';
 import CustomerDetail from './pages/CustomerDetail';
@@ -11,6 +13,12 @@ import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 
 export default function App() {
+  const [unlocked, setUnlocked] = useState(() => !!sessionStorage.getItem('app_unlocked'));
+
+  if (!unlocked) {
+    return <LockScreen onUnlock={() => setUnlocked(true)} />;
+  }
+
   return (
     <BrowserRouter>
       <Routes>
