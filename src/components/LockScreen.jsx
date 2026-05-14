@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plane, Lock, Eye, EyeOff } from 'lucide-react';
+import db from '../db/db';
 
 async function hashPassword(password) {
   const data = new TextEncoder().encode(password);
@@ -7,12 +8,41 @@ async function hashPassword(password) {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+async function getStoredHash() {
+  const row = await db.settings.get('password_hash');
+  return row?.value || null;
+}
+
+async function storeHash(hash) {
+  await db.settings.put({ key: 'password_hash', value: hash });
+}
+
+export async function verifyPassword(password) {
+  const hash = await hashPassword(password);
+  const stored = await getStoredHash();
+  return hash === stored;
+}
+
+export async function changePassword(newPassword) {
+  const hash = await hashPassword(newPassword);
+  await storeHash(hash);
+}
+
+export function lockApp() {
+  sessionStorage.removeItem('app_unlocked');
+  window.location.reload();
+}
+
 export function LockScreen({ onUnlock }) {
+  const [isFirstTime, setIsFirstTime] = useState(null); // null = still loading
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [show, setShow] = useState(false);
-  const isFirstTime = !localStorage.getItem('app_password_hash');
+
+  useEffect(() => {
+    getStoredHash().then(hash => setIsFirstTime(!hash));
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -22,12 +52,13 @@ export function LockScreen({ onUnlock }) {
       if (password.length < 4) { setError('Password must be at least 4 characters'); return; }
       if (password !== confirm) { setError('Passwords do not match'); return; }
       const hash = await hashPassword(password);
-      localStorage.setItem('app_password_hash', hash);
+      await storeHash(hash);
       sessionStorage.setItem('app_unlocked', '1');
       onUnlock();
     } else {
       const hash = await hashPassword(password);
-      if (hash === localStorage.getItem('app_password_hash')) {
+      const stored = await getStoredHash();
+      if (hash === stored) {
         sessionStorage.setItem('app_unlocked', '1');
         onUnlock();
       } else {
@@ -36,6 +67,15 @@ export function LockScreen({ onUnlock }) {
       }
     }
   };
+
+  // Still loading — don't flash the screen
+  if (isFirstTime === null) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
@@ -90,25 +130,10 @@ export function LockScreen({ onUnlock }) {
 
         {!isFirstTime && (
           <p className="text-center text-xs text-gray-400 mt-6">
-            Forgot password? Clear browser data to reset.
+            Forgot password? Clear browser site data to reset.
           </p>
         )}
       </div>
     </div>
   );
-}
-
-export async function verifyPassword(password) {
-  const hash = await hashPassword(password);
-  return hash === localStorage.getItem('app_password_hash');
-}
-
-export async function changePassword(newPassword) {
-  const hash = await hashPassword(newPassword);
-  localStorage.setItem('app_password_hash', hash);
-}
-
-export function lockApp() {
-  sessionStorage.removeItem('app_unlocked');
-  window.location.reload();
 }
