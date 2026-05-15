@@ -5,6 +5,11 @@
 body { margin: 0; font-family: system-ui, -apple-system, sans-serif; }
 #root { min-height: 100vh; }
 
+/* Prevent iOS auto-zoom on inputs (triggered when font-size < 16px) */
+input, select, textarea {
+  font-size: 16px !important;
+}
+
 @layer utilities {
   .scrollbar-thin { scrollbar-width: thin; }
 }
