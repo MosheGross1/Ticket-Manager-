@@ -1,31 +1,52 @@
 import { useState, useEffect, useCallback } from 'react';
-import { liveQuery } from 'dexie';
-import { v4 as uuidv4 } from 'uuid';
-import db from '../db/db';
+import {
+  collection, onSnapshot, addDoc, deleteDoc,
+  doc, query, where, writeBatch, increment,
+} from 'firebase/firestore';
+import { db } from '../firebase';
 
 export function usePayments({ ticketId, customerId } = {}) {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const obs = liveQuery(async () => {
-      if (ticketId) return db.payments.where('ticketId').equals(ticketId).reverse().sortBy('date');
-      if (customerId) return db.payments.where('customerId').equals(customerId).reverse().sortBy('date');
-      return db.payments.orderBy('date').reverse().toArray();
-    });
-    const sub = obs.subscribe({ next: rows => { setPayments(rows); setLoading(false); }, error: () => setLoading(false) });
-    return () => sub.unsubscribe();
+    let q;
+    if (ticketId) q = query(collection(db, 'payments'), where('ticketId', '==', ticketId));
+    else if (customerId) q = query(collection(db, 'payments'), where('customerId', '==', customerId));
+    else q = collection(db, 'payments');
+
+    const unsub = onSnapshot(q, snap => {
+      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      setPayments(rows);
+      setLoading(false);
+    }, () => setLoading(false));
+    return unsub;
   }, [ticketId, customerId]);
 
   const addPayment = useCallback(async (data) => {
-    const id = uuidv4();
-    const now = Date.now();
-    await db.payments.add({ id, ...data, createdAt: now, updatedAt: now });
-    return id;
+    const batch = writeBatch(db);
+    const payRef = doc(collection(db, 'payments'));
+    batch.set(payRef, { ...data, createdAt: Date.now() });
+    // Keep ticket.amountPaid in sync
+    batch.update(doc(db, 'tickets', data.ticketId), {
+      amountPaid: increment(data.amount),
+      updatedAt: Date.now(),
+    });
+    await batch.commit();
+    return payRef.id;
   }, []);
 
-  const deletePayment = useCallback(async (id) => {
-    await db.payments.delete(id);
+  const deletePayment = useCallback(async (id, ticketId, amount) => {
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'payments', id));
+    if (ticketId && amount) {
+      batch.update(doc(db, 'tickets', ticketId), {
+        amountPaid: increment(-amount),
+        updatedAt: Date.now(),
+      });
+    }
+    await batch.commit();
   }, []);
 
   return { payments, loading, addPayment, deletePayment };

@@ -1,17 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
-import { liveQuery } from 'dexie';
-import { v4 as uuidv4 } from 'uuid';
-import db from '../db/db';
+import {
+  collection, onSnapshot, addDoc, updateDoc, deleteDoc,
+  doc, query, orderBy, getDocs, where, writeBatch, serverTimestamp,
+} from 'firebase/firestore';
+import { db } from '../firebase';
 
 export function useCustomers(searchQuery = '') {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
-    const obs = liveQuery(() => db.customers.orderBy('companyName').toArray());
-    const sub = obs.subscribe({ next: rows => { setCustomers(rows); setLoading(false); }, error: () => setLoading(false) });
-    return () => sub.unsubscribe();
+    const q = query(collection(db, 'customers'), orderBy('companyName'));
+    const unsub = onSnapshot(q, snap => {
+      setCustomers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    }, () => setLoading(false));
+    return unsub;
   }, []);
 
   const filtered = searchQuery.trim()
@@ -27,30 +31,34 @@ export function useCustomers(searchQuery = '') {
     : customers;
 
   const addCustomer = useCallback(async (data) => {
-    const id = uuidv4();
-    const now = Date.now();
-    await db.customers.add({ id, ...data, createdAt: now, updatedAt: now });
-    return id;
+    const ref = await addDoc(collection(db, 'customers'), {
+      ...data, createdAt: Date.now(), updatedAt: Date.now(),
+    });
+    return ref.id;
   }, []);
 
   const updateCustomer = useCallback(async (id, data) => {
-    await db.customers.update(id, { ...data, updatedAt: Date.now() });
+    await updateDoc(doc(db, 'customers', id), { ...data, updatedAt: Date.now() });
   }, []);
 
   const deleteCustomer = useCallback(async (id) => {
-    await db.transaction('rw', db.customers, db.tickets, db.payments, db.invoices, async () => {
-      const tickets = await db.tickets.where('customerId').equals(id).toArray();
-      for (const t of tickets) {
-        await db.payments.where('ticketId').equals(t.id).delete();
-      }
-      await db.tickets.where('customerId').equals(id).delete();
-      await db.invoices.where('customerId').equals(id).delete();
-      await db.customers.delete(id);
-    });
+    const batch = writeBatch(db);
+    const ticketsSnap = await getDocs(query(collection(db, 'tickets'), where('customerId', '==', id)));
+    for (const t of ticketsSnap.docs) {
+      const pmtsSnap = await getDocs(query(collection(db, 'payments'), where('ticketId', '==', t.id)));
+      pmtsSnap.docs.forEach(p => batch.delete(p.ref));
+      batch.delete(t.ref);
+    }
+    const invSnap = await getDocs(query(collection(db, 'invoices'), where('customerId', '==', id)));
+    invSnap.docs.forEach(inv => batch.delete(inv.ref));
+    batch.delete(doc(db, 'customers', id));
+    await batch.commit();
   }, []);
 
   const getCustomer = useCallback(async (id) => {
-    return db.customers.get(id);
+    const { getDoc } = await import('firebase/firestore');
+    const snap = await getDoc(doc(db, 'customers', id));
+    return snap.exists() ? { id: snap.id, ...snap.data() } : null;
   }, []);
 
   return { customers: filtered, allCustomers: customers, loading, addCustomer, updateCustomer, deleteCustomer, getCustomer };

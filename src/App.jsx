@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { HashRouter as BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from './firebase';
 import { Layout } from './components/layout/Layout';
 import { LockScreen } from './components/LockScreen';
 import Dashboard from './pages/Dashboard';
@@ -13,10 +15,24 @@ import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 
 export default function App() {
-  const [unlocked, setUnlocked] = useState(() => !!sessionStorage.getItem('app_unlocked'));
+  const [user, setUser] = useState(undefined); // undefined = loading
 
-  if (!unlocked) {
-    return <LockScreen onUnlock={() => setUnlocked(true)} />;
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, u => setUser(u));
+    return unsub;
+  }, []);
+
+  // Still checking auth state
+  if (user === undefined) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LockScreen onUnlock={() => {}} />;
   }
 
   return (

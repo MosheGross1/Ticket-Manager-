@@ -10,12 +10,11 @@ import { Card, StatCard } from '../components/ui/Card';
 import { StatusBadge } from '../components/ui/Badge';
 import { fmt, fmtDate } from '../utils/calculations';
 import { TicketForm } from './Tickets';
-import db from '../db/db';
 
 export default function CustomerDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { getCustomer, updateCustomer } = useCustomers();
+  const { getCustomer } = useCustomers();
   const { tickets, loading: ticketsLoading, addTicket } = useTickets({ customerId: id });
   const { invoices, createInvoice } = useInvoices(id);
   const [customer, setCustomer] = useState(null);
@@ -23,39 +22,22 @@ export default function CustomerDetail() {
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [selectedTickets, setSelectedTickets] = useState([]);
   const [invoiceNotes, setInvoiceNotes] = useState('');
-  const [balances, setBalances] = useState({});
 
   useEffect(() => {
     getCustomer(id).then(c => { if (!c) navigate('/customers'); else setCustomer(c); });
-  }, [id, getCustomer, navigate]);
+  }, [id]);
 
-  useEffect(() => {
-    async function loadBalances() {
-      const map = {};
-      for (const t of tickets) {
-        const pmts = await db.payments.where('ticketId').equals(t.id).toArray();
-        map[t.id] = pmts.reduce((s, p) => s + (p.amount || 0), 0);
-      }
-      setBalances(map);
-    }
-    if (tickets.length) loadBalances();
-  }, [tickets]);
-
-  const totalCharged = tickets.filter(t => t.status !== 'Cancelled').reduce((s, t) => s + (t.amountCharged || 0), 0);
-  const totalPaid = Object.values(balances).reduce((s, v) => s + v, 0);
+  const activeTickets = tickets.filter(t => t.status !== 'Cancelled');
+  const totalCharged = activeTickets.reduce((s, t) => s + (t.amountCharged || 0), 0);
+  const totalPaid = activeTickets.reduce((s, t) => s + (t.amountPaid || 0), 0);
   const totalOwed = totalCharged - totalPaid;
 
-  const handleAddTicket = async (data) => {
-    await addTicket({ ...data, customerId: id });
-    setAddTicketOpen(false);
-  };
+  const handleAddTicket = async (data) => { await addTicket({ ...data, customerId: id }); setAddTicketOpen(false); };
 
   const handleCreateInvoice = async () => {
     if (!selectedTickets.length) return;
     await createInvoice({ customerId: id, ticketIds: selectedTickets, notes: invoiceNotes });
-    setInvoiceOpen(false);
-    setSelectedTickets([]);
-    setInvoiceNotes('');
+    setInvoiceOpen(false); setSelectedTickets([]); setInvoiceNotes('');
   };
 
   if (!customer) return <div className="text-center py-16 text-gray-400">Loading…</div>;
@@ -63,9 +45,7 @@ export default function CustomerDetail() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center gap-3">
-        <button onClick={() => navigate('/customers')} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg">
-          <ArrowLeft size={18} />
-        </button>
+        <button onClick={() => navigate('/customers')} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg"><ArrowLeft size={18} /></button>
         <div className="flex-1">
           <h1 className="text-2xl font-bold text-gray-900">{customer.companyName}</h1>
           {customer.contactName && <p className="text-sm text-gray-500">{customer.contactName}</p>}
@@ -96,41 +76,34 @@ export default function CustomerDetail() {
           <h3 className="font-semibold text-gray-800">Tickets</h3>
           <span className="text-sm text-gray-400">{tickets.length} tickets</span>
         </div>
-        {ticketsLoading ? (
-          <div className="py-8 text-center text-gray-400 text-sm">Loading…</div>
-        ) : tickets.length === 0 ? (
-          <div className="py-12 text-center text-gray-400">No tickets yet</div>
-        ) : (
-          <div className="divide-y divide-gray-100">
-            {tickets.map(t => {
-              const paid = balances[t.id] || 0;
-              const remaining = (t.amountCharged || 0) - paid;
-              return (
-                <Link key={t.id} to={`/tickets/${t.id}`} className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50 group">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-medium text-gray-900 text-sm">{t.passengerName}</p>
-                      <StatusBadge status={t.status} />
+        {ticketsLoading ? <div className="py-8 text-center text-gray-400 text-sm">Loading…</div> :
+          tickets.length === 0 ? <div className="py-12 text-center text-gray-400">No tickets yet</div> : (
+            <div className="divide-y divide-gray-100">
+              {tickets.map(t => {
+                const remaining = (t.amountCharged || 0) - (t.amountPaid || 0);
+                return (
+                  <Link key={t.id} to={`/tickets/${t.id}`} className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-medium text-gray-900 text-sm">{t.passengerName}</p>
+                        <StatusBadge status={t.status} />
+                      </div>
+                      <p className="text-xs text-gray-400 mt-0.5">{t.airline} {t.flightNumber} · #{t.ticketNumber} · {fmtDate(t.bookingDate)}</p>
                     </div>
-                    <p className="text-xs text-gray-400 mt-0.5">{t.airline} {t.flightNumber} · #{t.ticketNumber} · {fmtDate(t.bookingDate)}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="font-semibold text-gray-900 text-sm">{fmt(t.amountCharged)}</p>
-                    {remaining > 0 && <p className="text-xs text-red-500">Owes {fmt(remaining)}</p>}
-                    {remaining <= 0 && <p className="text-xs text-green-600">Paid</p>}
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        )}
+                    <div className="text-right shrink-0">
+                      <p className="font-semibold text-gray-900 text-sm">{fmt(t.amountCharged)}</p>
+                      {remaining > 0 ? <p className="text-xs text-red-500">Owes {fmt(remaining)}</p> : <p className="text-xs text-green-600">Paid</p>}
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
       </Card>
 
       {invoices.length > 0 && (
         <Card>
-          <div className="px-5 py-4 border-b border-gray-100">
-            <h3 className="font-semibold text-gray-800">Invoices</h3>
-          </div>
+          <div className="px-5 py-4 border-b border-gray-100"><h3 className="font-semibold text-gray-800">Invoices</h3></div>
           <div className="divide-y divide-gray-100">
             {invoices.map(inv => (
               <div key={inv.id} className="flex items-center gap-4 px-5 py-4">
@@ -151,16 +124,13 @@ export default function CustomerDetail() {
 
       <Modal open={invoiceOpen} onClose={() => setInvoiceOpen(false)} title="Generate Invoice">
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-gray-600">Select tickets to include in the invoice:</p>
+          <p className="text-sm text-gray-600">Select tickets to include:</p>
           <div className="border rounded-lg divide-y max-h-60 overflow-y-auto">
             {tickets.map(t => (
               <label key={t.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={selectedTickets.includes(t.id)}
+                <input type="checkbox" checked={selectedTickets.includes(t.id)}
                   onChange={e => setSelectedTickets(prev => e.target.checked ? [...prev, t.id] : prev.filter(x => x !== t.id))}
-                  className="rounded"
-                />
+                  className="rounded" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800">{t.passengerName}</p>
                   <p className="text-xs text-gray-400">#{t.ticketNumber} · {fmt(t.amountCharged)}</p>
@@ -170,20 +140,14 @@ export default function CustomerDetail() {
             ))}
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Invoice Notes</label>
-            <textarea
-              rows={2}
-              value={invoiceNotes}
-              onChange={e => setInvoiceNotes(e.target.value)}
+            <label className="text-sm font-medium text-gray-700">Notes</label>
+            <textarea rows={2} value={invoiceNotes} onChange={e => setInvoiceNotes(e.target.value)}
               className="border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Optional notes for the invoice…"
-            />
+              placeholder="Optional notes…" />
           </div>
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={() => setInvoiceOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreateInvoice} disabled={!selectedTickets.length}>
-              <FileText size={16} /> Generate & Download PDF
-            </Button>
+            <Button onClick={handleCreateInvoice} disabled={!selectedTickets.length}><FileText size={16} /> Generate & Download PDF</Button>
           </div>
         </div>
       </Modal>

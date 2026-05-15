@@ -1,47 +1,24 @@
-import { useState, useEffect } from 'react';
-import { Cloud, CloudOff, RefreshCw, Settings as SettingsIcon, Trash2, Download, Upload, Lock, LogOut } from 'lucide-react';
+import { useState } from 'react';
+import { signOut } from 'firebase/auth';
+import { collection, getDocs, writeBatch, doc } from 'firebase/firestore';
+import { LogOut, Download, Upload, Trash2, Settings as SettingsIcon, Shield } from 'lucide-react';
+import { auth, db } from '../firebase';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { Input } from '../components/ui/Input';
-import { isAuthenticated, isConfigured, initGoogleAuth, requestToken, signOut } from '../services/driveService';
-import { syncToCloud, syncFromCloud, getSyncStatus, onSyncStatus } from '../services/syncService';
-import { lockApp, verifyPassword, changePassword } from '../components/LockScreen';
-import db from '../db/db';
+import { lockApp } from '../components/LockScreen';
+
+const TABLES = ['customers', 'tickets', 'payments', 'invoices'];
 
 export default function Settings() {
-  const [clientId, setClientId] = useState(localStorage.getItem('google_client_id') || '');
-  const [authed, setAuthed] = useState(isAuthenticated());
-  const [syncStatus, setSyncStatus] = useState(getSyncStatus());
   const [exportLoading, setExportLoading] = useState(false);
-  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
-  const [pwError, setPwError] = useState('');
-  const [pwSuccess, setPwSuccess] = useState(false);
-
-  useEffect(() => {
-    const unsub = onSyncStatus(s => { setSyncStatus(s); setAuthed(isAuthenticated()); });
-    return unsub;
-  }, []);
-
-  const saveClientId = () => {
-    localStorage.setItem('google_client_id', clientId.trim());
-    initGoogleAuth().then(() => alert('Client ID saved. Click "Connect Google Drive" to authenticate.'));
-  };
-
-  const handleConnect = () => {
-    initGoogleAuth().then(() => requestToken(false));
-    setTimeout(() => { setAuthed(isAuthenticated()); }, 2000);
-  };
-
-  const handleDisconnect = () => {
-    signOut();
-    setAuthed(false);
-  };
+  const user = auth.currentUser;
 
   const handleExport = async () => {
     setExportLoading(true);
     const data = {};
-    for (const table of ['customers', 'tickets', 'payments', 'invoices']) {
-      data[table] = await db[table].toArray();
+    for (const table of TABLES) {
+      const snap = await getDocs(collection(db, table));
+      data[table] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -56,156 +33,69 @@ export default function Settings() {
   const handleImport = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!confirm('This will overwrite all existing data. Continue?')) return;
     const text = await file.text();
     const data = JSON.parse(text);
-    for (const table of ['customers', 'tickets', 'payments', 'invoices']) {
-      if (Array.isArray(data[table])) {
-        await db[table].clear();
-        await db[table].bulkPut(data[table]);
-      }
+    for (const table of TABLES) {
+      if (!Array.isArray(data[table])) continue;
+      const batch = writeBatch(db);
+      // Delete existing
+      const snap = await getDocs(collection(db, table));
+      snap.docs.forEach(d => batch.delete(d.ref));
+      // Add imported
+      data[table].forEach(record => {
+        const { id, ...rest } = record;
+        batch.set(doc(db, table, id || crypto.randomUUID()), rest);
+      });
+      await batch.commit();
     }
     alert('Data imported successfully!');
     e.target.value = '';
   };
 
   const handleClearAll = async () => {
-    if (!confirm('Delete ALL data? This cannot be undone!')) return;
-    for (const table of ['customers', 'tickets', 'payments', 'invoices']) {
-      await db[table].clear();
+    if (!confirm('Delete ALL data from Firebase? This cannot be undone!')) return;
+    for (const table of TABLES) {
+      const snap = await getDocs(collection(db, table));
+      const batch = writeBatch(db);
+      snap.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
     }
     alert('All data cleared.');
+  };
+
+  const handleSignOut = async () => {
+    await signOut(auth);
   };
 
   return (
     <div className="flex flex-col gap-6 max-w-2xl">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Configure sync and manage your data</p>
+        <p className="text-sm text-gray-500 mt-0.5">Manage your account and data</p>
       </div>
 
       <Card className="p-6">
         <div className="flex items-center gap-2 mb-4">
-          <Cloud size={18} className="text-blue-600" />
-          <h2 className="font-semibold text-gray-900">Google Drive Sync</h2>
+          <Shield size={18} className="text-blue-600" />
+          <h2 className="font-semibold text-gray-900">Account</h2>
         </div>
-
-        {!authed ? (
-          <div className="flex flex-col gap-4">
-            <p className="text-sm text-gray-600">
-              Connect Google Drive to automatically back up and sync your data across devices.
-              You'll need a Google Cloud project with the Drive API enabled.
-            </p>
-
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-gray-600 space-y-1">
-              <p className="font-medium text-gray-800">Setup steps:</p>
-              <ol className="list-decimal list-inside space-y-1 mt-2">
-                <li>Go to <strong>console.cloud.google.com</strong></li>
-                <li>Create a project → Enable <strong>Google Drive API</strong></li>
-                <li>Create OAuth 2.0 credentials (Web application type)</li>
-                <li>Add <code className="bg-gray-200 px-1 rounded">http://localhost:5173</code> to authorized origins</li>
-                <li>Copy your <strong>Client ID</strong> and paste it below</li>
-              </ol>
-            </div>
-
-            <div className="flex gap-2">
-              <Input
-                value={clientId}
-                onChange={e => setClientId(e.target.value)}
-                placeholder="Paste your Google Client ID here…"
-                className="flex-1"
-              />
-              <Button onClick={saveClientId} variant="secondary">Save</Button>
-            </div>
-
-            {clientId && (
-              <Button onClick={handleConnect} className="self-start">
-                <Cloud size={16} /> Connect Google Drive
-              </Button>
-            )}
+        <div className="flex items-center justify-between py-3 border-b border-gray-100">
+          <div>
+            <p className="font-medium text-gray-800 text-sm">Signed in as</p>
+            <p className="text-xs text-gray-500 mt-0.5">{user?.email}</p>
           </div>
-        ) : (
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-lg p-4">
-              <Cloud size={18} className="text-green-600" />
-              <div className="flex-1">
-                <p className="font-medium text-green-800">Connected to Google Drive</p>
-                {syncStatus.lastSync && (
-                  <p className="text-xs text-green-600">Last synced: {new Date(syncStatus.lastSync).toLocaleString()}</p>
-                )}
-                {syncStatus.status === 'error' && <p className="text-xs text-red-600">{syncStatus.error}</p>}
-              </div>
-              {syncStatus.status === 'syncing' && <RefreshCw size={16} className="text-blue-500 animate-spin" />}
-            </div>
-
-            <div className="flex gap-3 flex-wrap">
-              <Button onClick={syncToCloud} variant="secondary" size="sm">
-                <Upload size={14} /> Sync to Drive
-              </Button>
-              <Button onClick={syncFromCloud} variant="secondary" size="sm">
-                <Download size={14} /> Pull from Drive
-              </Button>
-              <Button onClick={handleDisconnect} variant="ghost" size="sm" className="text-red-600 hover:bg-red-50">
-                <CloudOff size={14} /> Disconnect
-              </Button>
-            </div>
-          </div>
-        )}
-      </Card>
-
-      <Card className="p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Lock size={18} className="text-gray-600" />
-          <h2 className="font-semibold text-gray-900">Security</h2>
+          <Button onClick={handleSignOut} variant="secondary" size="sm">
+            <LogOut size={14} /> Sign Out
+          </Button>
         </div>
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between py-3 border-b border-gray-100">
-            <div>
-              <p className="font-medium text-gray-800 text-sm">Lock app</p>
-              <p className="text-xs text-gray-400">Requires password to re-enter</p>
-            </div>
-            <Button onClick={lockApp} variant="secondary" size="sm">
-              <LogOut size={14} /> Lock Now
-            </Button>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            <p className="font-medium text-gray-800 text-sm">Change password</p>
-            <Input
-              placeholder="Current password"
-              type="password"
-              value={pwForm.current}
-              onChange={e => { setPwForm(f => ({ ...f, current: e.target.value })); setPwError(''); setPwSuccess(false); }}
-            />
-            <Input
-              placeholder="New password (min 4 characters)"
-              type="password"
-              value={pwForm.next}
-              onChange={e => { setPwForm(f => ({ ...f, next: e.target.value })); setPwError(''); setPwSuccess(false); }}
-            />
-            <Input
-              placeholder="Confirm new password"
-              type="password"
-              value={pwForm.confirm}
-              onChange={e => { setPwForm(f => ({ ...f, confirm: e.target.value })); setPwError(''); setPwSuccess(false); }}
-            />
-            {pwError && <p className="text-xs text-red-600">{pwError}</p>}
-            {pwSuccess && <p className="text-xs text-green-600">Password changed successfully!</p>}
-            <Button
-              size="sm"
-              className="self-start"
-              onClick={async () => {
-                setPwError(''); setPwSuccess(false);
-                if (!await verifyPassword(pwForm.current)) { setPwError('Current password is incorrect'); return; }
-                if (pwForm.next.length < 4) { setPwError('New password must be at least 4 characters'); return; }
-                if (pwForm.next !== pwForm.confirm) { setPwError('New passwords do not match'); return; }
-                await changePassword(pwForm.next);
-                setPwForm({ current: '', next: '', confirm: '' });
-                setPwSuccess(true);
-              }}
-            >
-              Change Password
-            </Button>
-          </div>
+        <div className="pt-4 text-sm text-gray-500 space-y-1">
+          <p>To change your password:</p>
+          <ol className="list-decimal list-inside space-y-1 text-gray-400">
+            <li>Go to <strong className="text-gray-600">console.firebase.google.com</strong></li>
+            <li>Select your project → <strong className="text-gray-600">Authentication → Users</strong></li>
+            <li>Click the menu next to your user → <strong className="text-gray-600">Reset password</strong></li>
+          </ol>
         </div>
       </Card>
 
@@ -215,11 +105,11 @@ export default function Settings() {
           <h2 className="font-semibold text-gray-900">Data Management</h2>
         </div>
 
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
           <div className="flex items-center justify-between py-3 border-b border-gray-100">
             <div>
               <p className="font-medium text-gray-800 text-sm">Export backup</p>
-              <p className="text-xs text-gray-400">Download all data as a JSON file</p>
+              <p className="text-xs text-gray-400">Download all Firebase data as a JSON file</p>
             </div>
             <Button onClick={handleExport} variant="secondary" size="sm" disabled={exportLoading}>
               <Download size={14} /> Export
@@ -240,7 +130,7 @@ export default function Settings() {
           <div className="flex items-center justify-between py-3">
             <div>
               <p className="font-medium text-red-700 text-sm">Clear all data</p>
-              <p className="text-xs text-gray-400">Permanently delete everything from this device</p>
+              <p className="text-xs text-gray-400">Permanently delete everything from Firebase</p>
             </div>
             <Button onClick={handleClearAll} variant="danger" size="sm">
               <Trash2 size={14} /> Clear

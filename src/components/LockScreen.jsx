@@ -1,81 +1,31 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { signInWithEmailAndPassword, signOut as firebaseSignOut, updatePassword } from 'firebase/auth';
 import { Plane, Lock, Eye, EyeOff } from 'lucide-react';
-import db from '../db/db';
-
-async function hashPassword(password) {
-  const data = new TextEncoder().encode(password);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function getStoredHash() {
-  const row = await db.settings.get('password_hash');
-  return row?.value || null;
-}
-
-async function storeHash(hash) {
-  await db.settings.put({ key: 'password_hash', value: hash });
-}
-
-export async function verifyPassword(password) {
-  const hash = await hashPassword(password);
-  const stored = await getStoredHash();
-  return hash === stored;
-}
-
-export async function changePassword(newPassword) {
-  const hash = await hashPassword(newPassword);
-  await storeHash(hash);
-}
-
-export function lockApp() {
-  sessionStorage.removeItem('app_unlocked');
-  window.location.reload();
-}
+import { auth } from '../firebase';
 
 export function LockScreen({ onUnlock }) {
-  const [isFirstTime, setIsFirstTime] = useState(null); // null = still loading
+  const storedEmail = localStorage.getItem('team_email') || '';
+  const [email, setEmail] = useState(storedEmail);
   const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
-  const [error, setError] = useState('');
   const [show, setShow] = useState(false);
-
-  useEffect(() => {
-    getStoredHash().then(hash => setIsFirstTime(!hash));
-  }, []);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const needsEmail = !storedEmail;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-
-    if (isFirstTime) {
-      if (password.length < 4) { setError('Password must be at least 4 characters'); return; }
-      if (password !== confirm) { setError('Passwords do not match'); return; }
-      const hash = await hashPassword(password);
-      await storeHash(hash);
-      sessionStorage.setItem('app_unlocked', '1');
+    setLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+      localStorage.setItem('team_email', email.trim());
       onUnlock();
-    } else {
-      const hash = await hashPassword(password);
-      const stored = await getStoredHash();
-      if (hash === stored) {
-        sessionStorage.setItem('app_unlocked', '1');
-        onUnlock();
-      } else {
-        setError('Incorrect password');
-        setPassword('');
-      }
+    } catch (err) {
+      setError('Incorrect email or password');
+      setPassword('');
     }
+    setLoading(false);
   };
-
-  // Still loading — don't flash the screen
-  if (isFirstTime === null) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
@@ -85,12 +35,28 @@ export function LockScreen({ onUnlock }) {
             <Plane size={32} className="text-white" />
           </div>
           <h1 className="text-xl font-bold text-gray-900">Ticket Manager</h1>
-          <p className="text-sm text-gray-500 text-center">
-            {isFirstTime ? 'Set a password to protect your app' : 'Enter your password to continue'}
-          </p>
+          <p className="text-sm text-gray-500 text-center">Sign in to continue</p>
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          {needsEmail && (
+            <input
+              type="email"
+              value={email}
+              onChange={e => { setEmail(e.target.value); setError(''); }}
+              placeholder="Team email"
+              required
+              autoFocus
+              className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          )}
+
+          {!needsEmail && (
+            <div className="text-center text-sm text-gray-500 bg-gray-50 rounded-xl py-2 px-4">
+              {storedEmail}
+            </div>
+          )}
+
           <div className="relative">
             <input
               type={show ? 'text' : 'password'}
@@ -98,7 +64,7 @@ export function LockScreen({ onUnlock }) {
               onChange={e => { setPassword(e.target.value); setError(''); }}
               placeholder="Password"
               required
-              autoFocus
+              autoFocus={!needsEmail}
               className="w-full border border-gray-300 rounded-xl px-4 py-3 pr-11 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <button type="button" onClick={() => setShow(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
@@ -106,34 +72,32 @@ export function LockScreen({ onUnlock }) {
             </button>
           </div>
 
-          {isFirstTime && (
-            <input
-              type={show ? 'text' : 'password'}
-              value={confirm}
-              onChange={e => { setConfirm(e.target.value); setError(''); }}
-              placeholder="Confirm password"
-              required
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          )}
-
           {error && <p className="text-sm text-red-600 text-center">{error}</p>}
 
           <button
             type="submit"
-            className="bg-blue-600 text-white rounded-xl py-3 font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+            disabled={loading}
+            className="bg-blue-600 text-white rounded-xl py-3 font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
           >
             <Lock size={16} />
-            {isFirstTime ? 'Set Password & Enter' : 'Unlock'}
+            {loading ? 'Signing in…' : 'Sign In'}
           </button>
-        </form>
 
-        {!isFirstTime && (
-          <p className="text-center text-xs text-gray-400 mt-6">
-            Forgot password? Clear browser site data to reset.
-          </p>
-        )}
+          {!needsEmail && (
+            <button
+              type="button"
+              onClick={() => { localStorage.removeItem('team_email'); window.location.reload(); }}
+              className="text-xs text-gray-400 hover:text-gray-600 text-center"
+            >
+              Use a different email
+            </button>
+          )}
+        </form>
       </div>
     </div>
   );
+}
+
+export function lockApp() {
+  firebaseSignOut(auth);
 }
