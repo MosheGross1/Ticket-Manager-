@@ -1,4 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect width="100" height="100" rx="20" fill="#2563eb"/>
-  <text x="50" y="68" font-size="55" text-anchor="middle" fill="white">✈</text>
+  <rect width="100" height="100" rx="22" fill="#2563eb"/>
+  <g transform="translate(50,50) rotate(-35)">
+    <rect x="-5.5" y="-30" width="11" height="55" rx="5.5" fill="white"/>
+    <path d="M-5,0 L-38,16 L-38,25 L-5,14 Z" fill="white"/>
+    <path d="M5,0 L38,16 L38,25 L5,14 Z" fill="white"/>
+    <path d="M-5,20 L-18,30 L-18,36 L-5,28 Z" fill="white"/>
+    <path d="M5,20 L18,30 L18,36 L5,28 Z" fill="white"/>
+  </g>
 </svg>
