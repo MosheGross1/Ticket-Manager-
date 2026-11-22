@@ -59,6 +59,7 @@ footer{color:var(--mute);font-size:14px}
 footer a{color:var(--vv)}
 .hide{display:none}
 .prog{background:var(--card)}
+.resume{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;background:var(--v);color:#fff;border-radius:12px;padding:14px 16px;margin:8px 0 12px}.resume b{display:block;font-size:16px}.resume span{font-size:14px;color:#ecdff7}.resume .b.go{background:#fff;color:#57068c;border-color:#fff}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:10px;margin:8px 0 16px}
 .kpi{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
 .kpi b{display:block;font:700 clamp(26px,6vw,34px)/1.1 "Libre Caslon Text",serif;color:var(--vv);font-variant-numeric:tabular-nums}
@@ -119,6 +120,7 @@ li.is-done .t{color:var(--mute)}li.is-done .n::after{content:" ✓";color:#2e8b5
 <main>
 <section class="band prog" id="progress"><div class="wrap">
 <h2>My progress</h2>
+<div class="resume hide" id="resume"></div>
 <div class="kpis" id="kpis"></div>
 <div class="grid2">
 <div class="card"><h3 class="ch">Today's commitments <span id="tdate" class="d"></span></h3><ol id="today" class="pl-list"></ol><p class="note" id="todayEmpty">Tap <b>+ Today</b> on any lecture, or <b>+ Today</b> beside "Up next" in a class below, to commit to it.</p></div>
@@ -173,8 +175,10 @@ const pw=document.getElementById('pw'),pf=document.getElementById('pf'),pt=docum
 const NC='https://www.youtube-nocookie.com/embed/';
 let cur=null;
 const KEY='damodaran-progress-v1';
-let S={done:{},started:{},plans:{},goals:{}};
+let S={done:{},started:{},plans:{},goals:{},pos:{},last:null};
 try{const r=localStorage.getItem(KEY);if(r){const o=JSON.parse(r);for(const k in S)if(o[k])S[k]=o[k]}}catch(err){}
+const mmss=s=>{s=Math.floor(s);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return (h?h+':'+pad(m):m)+':'+pad(x)};
+const persist=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(err){}};
 const store=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(err){}render()};
 const pad=n=>String(n).padStart(2,'0');
 const dk=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
@@ -187,7 +191,7 @@ LI.forEach(li=>{byId[li.dataset.id]=li;const p=document.createElement('p');p.cla
 const name=id=>{const li=byId[id];return li?li.dataset.t:id},cname=id=>{const li=byId[id];return li?li.dataset.c:''};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const isDone=id=>!!S.done[id];
-const setDone=(id,v)=>{if(v)S.done[id]=today();else delete S.done[id];store()};
+const setDone=(id,v)=>{if(v){S.done[id]=today();delete S.pos[id]}else delete S.done[id];store()};
 const togglePlan=(id,day)=>{day=day||today();const a=S.plans[day]||(S.plans[day]=[]);const i=a.indexOf(id);if(i<0)a.push(id);else a.splice(i,1);if(!a.length)delete S.plans[day];store()};
 const watch=id=>{const li=byId[id];if(!li)return;const a=li.querySelector('a.go');if(a)a.click()};
 const row=(id,extra)=>`<li class="${isDone(id)?'y':''}"><button type="button" class="box ${isDone(id)?'y':''}" data-a="done" data-id="${id}" aria-label="Done">${isDone(id)?'✓':''}</button><span class="tt">${esc(name(id))}<small>${esc(cname(id))}</small></span><button type="button" class="b sm" data-a="watch" data-id="${id}">▶</button>${extra||''}</li>`;
@@ -197,8 +201,11 @@ function render(){
   for(const li of LI){const id=li.dataset.id,d=isDone(id),pl=(S.plans[td]||[]).includes(id);
     li.classList.toggle('is-done',d);
     const [bd,bp]=li.querySelectorAll('.tk button');bd.setAttribute('aria-pressed',d);bd.textContent=d?'✓ Done':'Mark done';bp.setAttribute('aria-pressed',pl);bp.textContent=pl?'In today’s plan':'+ Today';
-    const t=li.querySelector('.t');let c=t.querySelector('.chip');if(S.started[id]&&!d){if(!c){c=document.createElement('span');c.className='chip';c.textContent='In progress';t.appendChild(c)}}else if(c)c.remove();
+    const t=li.querySelector('.t');let c=t.querySelector('.chip');if(S.started[id]&&!d){if(!c){c=document.createElement('span');c.className='chip';t.appendChild(c)}const ps=S.pos[id];c.textContent=ps&&ps.t>5?'Stopped at '+mmss(ps.t):'In progress'}else if(c)c.remove();
     if(li.closest('#online'))li.classList.toggle('hide',filt==='left'?d:filt==='done'?!d:false)}
+  // resume
+  const rs=document.getElementById('resume'),lp=S.last&&S.pos[S.last]&&!isDone(S.last)?S.last:null;rs.classList.toggle('hide',!lp);
+  if(lp)rs.innerHTML=`<div><b>Continue where you left off</b><span>${esc(name(lp))} · ${esc(cname(lp))} · at ${mmss(S.pos[lp].t)}${S.pos[lp].d?' of '+mmss(S.pos[lp].d):''}</span></div><button type="button" class="b go" data-a="watch" data-id="${lp}">▶ Resume</button>`;
   // today
   const tp=S.plans[td]||[];document.getElementById('tdate').textContent=fmt(td);
   document.getElementById('today').innerHTML=tp.map(id=>row(id,`<button type="button" class="b sm" data-a="unplan" data-id="${id}" aria-label="Remove">✕</button>`)).join('');
@@ -239,11 +246,31 @@ document.addEventListener('click',ev=>{
   if(lid&&!isDone(lid)&&!S.started[lid]){S.started[lid]=today();store()}
   if(!x.classList.contains('yt'))return;
   ev.preventDefault();cur=lid||null;
-  const src=x.dataset.v?NC+x.dataset.v+'?rel=0&autoplay=1&playsinline=1':NC+'videoseries?list='+x.dataset.l+'&rel=0&autoplay=1&playsinline=1';
+  const ps=cur&&S.pos[cur]&&!isDone(cur)?Math.max(0,Math.floor(S.pos[cur].t)-5):0;
+  const api='&enablejsapi=1&origin='+encodeURIComponent(location.origin);
+  const src=x.dataset.v?NC+x.dataset.v+'?rel=0&autoplay=1&playsinline=1'+(ps?'&start='+ps:'')+api:NC+'videoseries?list='+x.dataset.l+'&rel=0&autoplay=1&playsinline=1'+api;
+  if(cur&&x.dataset.v){S.last=cur;persist()}
   pf.src=src;pt.textContent=x.dataset.t||'';pdone.classList.toggle('hide',!cur);pdone.setAttribute('aria-pressed',cur?isDone(cur):false);pdone.textContent=cur&&isDone(cur)?'✓ Done':'Mark done';
-  pw.classList.remove('hide');window.scrollTo({top:0,behavior:'smooth'})});
+  pw.classList.remove('hide');window.scrollTo({top:0,behavior:'smooth'});listen()});
+let lt=0,tries=null;
+function listen(){clearInterval(tries);let n=0;tries=setInterval(()=>{n++;try{pf.contentWindow.postMessage(JSON.stringify({event:'listening',id:'dl',channel:'widget'}),'*')}catch(err){}if(n>20)clearInterval(tries)},500)}
+pf.addEventListener('load',listen);
+window.addEventListener('message',ev=>{
+  if(!/youtube(-nocookie)?\.com$/.test(new URL(ev.origin).hostname))return;
+  let m;try{m=typeof ev.data==='string'?JSON.parse(ev.data):ev.data}catch(err){return}
+  if(!m||!cur)return;
+  if(m.event==='onReady'||m.event==='infoDelivery'||m.event==='initialDelivery')clearInterval(tries);
+  const i=m.info||{};
+  if(typeof i.currentTime==='number'&&i.currentTime>0){const p=S.pos[cur]||(S.pos[cur]={t:0,d:0});p.t=i.currentTime;if(i.duration)p.d=i.duration;
+    const now=Date.now();if(now-lt>3000){lt=now;persist()}}
+  if(i.duration&&typeof i.duration==='number'){const p=S.pos[cur]||(S.pos[cur]={t:0,d:0});p.d=i.duration}
+  if(i.playerState===2){persist();render()}
+  if(i.playerState===0&&!isDone(cur)){delete S.pos[cur];setDone(cur,true);pdone.setAttribute('aria-pressed',true);pdone.textContent='✓ Done'}
+});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)persist()});
+window.addEventListener('pagehide',persist);
 pdone.addEventListener('click',()=>{if(!cur)return;setDone(cur,!isDone(cur));pdone.setAttribute('aria-pressed',isDone(cur));pdone.textContent=isDone(cur)?'✓ Done':'Mark done'});
-document.getElementById('px').addEventListener('click',()=>{pf.src='about:blank';pw.classList.add('hide');cur=null});
+document.getElementById('px').addEventListener('click',()=>{persist();pf.src='about:blank';pw.classList.add('hide');cur=null;render()});
 document.getElementById('goal').addEventListener('input',e=>{const v=parseInt(e.target.value,10);const wk=wdays()[0];if(v>0)S.goals[wk]=v;else delete S.goals[wk];store()});
 document.getElementById('fl').addEventListener('click',e=>{const b=e.target.closest('[data-f]');if(!b)return;filt=b.dataset.f;for(const c of document.querySelectorAll('#fl .b'))c.classList.toggle('on',c===b);render()});
 const msg=document.getElementById('bkmsg'),ta=document.getElementById('bktext');
