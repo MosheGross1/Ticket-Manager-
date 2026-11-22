@@ -16,7 +16,11 @@ export default defineConfig({
         display: 'standalone',
         icons: [{ src: '/pwa-icon.svg', sizes: 'any', type: 'image/svg+xml' }],
       },
-      workbox: { globPatterns: ['**/*.{js,css,html,svg,png}'] },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,png}'],
+        globIgnores: ['damodaran/**'],
+        navigateFallbackDenylist: [/\/damodaran\//],
+      },
     }),
   ],
 })
